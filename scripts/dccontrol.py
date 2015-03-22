@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 
 import rospy
+import threading
 import RPi.GPIO as GPIO
 from time import sleep
 
@@ -8,6 +9,8 @@ from pi_dc_motor.msg import Motor
 
 motorLeft = None
 motorRight = None
+TIME_OUT = 500      # Maximum time for waiting next instruction
+timer = None
 
 def config_gpio():
     global motorLeft
@@ -58,6 +61,7 @@ def right_dir(direction):
         GPIO.output(7, 0)
         GPIO.output(8, 1)
 def stop():
+    rospy.loginfo(rospy.get_caller_id() + " Motor control: Stop motors")
     global motorLeft
     global motorRight
     left_dir(0)
@@ -86,12 +90,18 @@ def terminate():
     global motorLeft
     global motorRight
     # Stop and clean
+    stop()
     motorLeft.stop()
     motorRight.stop()
     GPIO.cleanup()
 
 def callback(data):
-    rospy.loginfo(rospy.get_caller_id() + "Motor control: left=%d, right=%d" % (data.left, data.right))
+    rospy.loginfo(rospy.get_caller_id() + " Motor control: left=%d, right=%d" % (data.left, data.right))
+    # Check if timer is finished
+    global timer
+    if timer.isAlive():
+        # If timer is alive, cancel it and restart
+        timer.cancel()
     left = data.left
     right = data.right
 
@@ -105,6 +115,11 @@ def callback(data):
         right = 100
     go(left, right)
 
+    # Create timer thread again
+    timer = threading.Timer(TIME_OUT/1000.0, stop)
+    # Start timeout timer
+    timer.start()
+
 def listener():
 
     # In ROS, nodes are uniquely named. If two nodes with the same
@@ -115,6 +130,12 @@ def listener():
     rospy.init_node('pi_dc_motor', anonymous=True)
 
     config_gpio()
+
+    # Create time out timer, this timer ensure the next instruction must come
+    # in TIME_OUT (ms)
+    global timer
+    timer = threading.Timer(TIME_OUT/1000.0, stop)
+    timer.start()
 
     rospy.Subscriber("pi_motor_control", Motor, callback)
 
